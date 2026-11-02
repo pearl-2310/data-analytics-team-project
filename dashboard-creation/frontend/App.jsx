@@ -27,7 +27,7 @@ function rowsFrom(payload) {
   // Supports common Flask response shapes: array, {data: []}, {results: []}, etc.
   if (Array.isArray(payload)) return payload;
   if (!payload || typeof payload !== "object") return [];
-  for (const key of ["data", "results", "rows", "records", "weights", "summary", "outcomes", "placebo"]) {
+  for (const key of ["data", "results", "rows", "records", "weights", "summary", "placebo"]) {
     if (Array.isArray(payload[key])) return payload[key];
   }
   return [];
@@ -116,6 +116,112 @@ function DataTable({ rows, emptyText = "No results returned by the API yet." }) 
   );
 }
 
+
+function OutcomeAnalysis({ rows, label, subtitle }) {
+  const [selectedDate, setSelectedDate] = useState("");
+  const [appliedDate, setAppliedDate] = useState("");
+
+  const availableDates = [...new Set(
+    rows.map((row) => String(row.date ?? "").slice(0, 10)).filter(Boolean)
+  )].sort();
+
+  // Before Show Data, display the complete chart.
+  // After Show Data, display only the selected date on the chart and in the table.
+  const visibleRows = appliedDate
+    ? rows.filter((row) => String(row.date ?? "").slice(0, 10) === appliedDate)
+    : rows;
+
+  const chartRows = visibleRows.map((row) => ({
+    ...row,
+    date: formatDate(row.date),
+  }));
+
+  return (
+    <ChartCard
+      title={`${label}: Actual vs Synthetic`}
+      subtitle={appliedDate ? `${subtitle} · Selected date: ${formatDate(appliedDate)}` : subtitle}
+    >
+      {chartRows.length ? (
+        <ResponsiveContainer width="100%" height={350}>
+          <LineChart data={chartRows}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="date" minTickGap={30} />
+            <YAxis />
+            <Tooltip formatter={(value) => formatNumber(value)} />
+            <Legend />
+            <Line dataKey="actual" name={`Actual ${label.toLowerCase()}`} stroke="#5965e9" dot={chartRows.length === 1} activeDot={{ r: 6 }} />
+            <Line dataKey="synthetic" name={`Synthetic ${label.toLowerCase()}`} stroke="#20b894" dot={chartRows.length === 1} activeDot={{ r: 6 }} />
+            <Line dataKey="gap" name="Gap" stroke="#f59e0b" dot={chartRows.length === 1} activeDot={{ r: 6 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      ) : (
+        <div className="empty-state">No {label.toLowerCase()} results loaded.</div>
+      )}
+
+      <div className="date-data-section">
+        <div className="date-data-toolbar">
+          <div className="date-data-copy">
+            <span className="date-data-eyebrow">CHART DATE FILTER</span>
+            <h4>Choose a date</h4>
+            <p>Select a date and click Show Data to update the chart and view its records.</p>
+          </div>
+          <div className="date-data-controls">
+            <label className="date-select-wrap">
+              <CalendarDays size={17} />
+              <select
+                aria-label={`Select ${label.toLowerCase()} date`}
+                value={selectedDate}
+                onChange={(event) => setSelectedDate(event.target.value)}
+              >
+                <option value="">Select date</option>
+                {availableDates.map((date) => (
+                  <option key={date} value={date}>{formatDate(date)}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="show-data-button"
+              disabled={!selectedDate}
+              onClick={() => setAppliedDate(selectedDate)}
+            >
+              <Database size={16} />
+              Show Data
+            </button>
+            {appliedDate && (
+              <button
+                type="button"
+                className="hide-data-button"
+                onClick={() => {
+                  setAppliedDate("");
+                  setSelectedDate("");
+                }}
+              >
+                Show All
+              </button>
+            )}
+          </div>
+        </div>
+
+        {appliedDate && (
+          <div className="filtered-data-result">
+            <div className="filtered-data-heading">
+              <div>
+                <strong>{formatDate(appliedDate)}</strong>
+                <span>{visibleRows.length} matching record{visibleRows.length === 1 ? "" : "s"}</span>
+              </div>
+            </div>
+            <DataTable
+              rows={visibleRows}
+              emptyText="No records are available for the selected date."
+            />
+          </div>
+        )}
+      </div>
+    </ChartCard>
+  );
+}
+
 export default function App() {
   const [activePage, setActivePage] = useState("Overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -199,30 +305,6 @@ export default function App() {
     return candidates.length ? candidates[0] : null;
   }, [summaryRows]);
 
-  const summaryMetric = (outcomeNames, metricNames) => {
-    const row = summaryRows.find((item) =>
-      outcomeNames.includes(String(firstValue(item, ["Outcome", "outcome"], "")).toLowerCase())
-    );
-    return row ? firstValue(row, metricNames, null) : null;
-  };
-
-  const revenueAverageGap = summaryMetric(
-    ["revenue_proxy", "revenue proxy"],
-    ["Average_Post_Treatment_Gap", "average_post_treatment_gap"]
-  );
-  const revenueCumulativeGap = summaryMetric(
-    ["revenue_proxy", "revenue proxy"],
-    ["Cumulative_Post_Treatment_Gap", "cumulative_post_treatment_gap"]
-  );
-  const revenueRmse = summaryMetric(
-    ["revenue_proxy", "revenue proxy"],
-    ["Pre_Treatment_RMSE", "pre_treatment_rmse"]
-  );
-  const salesAverageGap = summaryMetric(
-    ["sales_volume", "sales volume"],
-    ["Average_Post_Treatment_Gap", "average_post_treatment_gap"]
-  );
-
   const donorCount = donorData.length;
   const outcomeCount = summaryRows.length || ((revenueRows.length ? 1 : 0) + (salesRows.length ? 1 : 0));
 
@@ -271,6 +353,7 @@ export default function App() {
         </nav>
         <div className="sidebar-bottom">
           <div className="project-status"><span className="status-dot" /><div><strong>Analysis workspace</strong><small>{apiOnline ? "Connected to Python results" : "Waiting for API"}</small></div></div>
+          <button className="nav-item settings-item" onClick={loadResults}><RefreshCw size={19} /><span>Refresh results</span></button>
           <div className="profile"><div className="avatar">CA</div><div><strong>Causal Analysis</strong><small>Research project</small></div></div>
         </div>
       </aside>
@@ -297,6 +380,14 @@ export default function App() {
             <button className="export-button" onClick={exportCurrent}><Download size={17} /> Export results CSV</button>
           </section>
 
+          <div className={apiOnline && !apiError ? "api-notice api-success" : "preview-notice"}>
+            {apiOnline && !apiError ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
+            <div>
+              <strong>{loading ? "Loading analysis results…" : apiOnline ? "Python results loaded" : "Backend connection needed"}</strong>
+              <p>{loading ? "Fetching summary, synthetic-control series, donor weights, placebo tests, and prepared data." : apiError || "Dashboard charts and tables are using the results returned by your Flask API. These are not the hardcoded preview values."}</p>
+            </div>
+            <button className="refresh-button" onClick={loadResults} disabled={loading}><RefreshCw size={16} /> Refresh</button>
+          </div>
 
           <section className="filter-row">
             <div className="filter-item"><CalendarDays size={17} /><span>Intervention date:</span><strong>10 Mar 2025</strong></div>
@@ -313,60 +404,21 @@ export default function App() {
               <MetricCard title="Intervention Date" value="10 Mar 2025" subtitle="Post-treatment begins" icon={CalendarDays} accent="orange" />
               <MetricCard title="Outcomes" value={String(outcomeCount).padStart(2, "0")} subtitle="Loaded analysis outcomes" icon={ChartNoAxesCombined} accent="green" />
             </section>
-
-            {/* Main chart spans the full dashboard width. */}
-            <section className="overview-main-chart">
-              <ChartCard title="Revenue: Actual vs Synthetic" subtitle="Revenue proxy · Real synthetic-control output" className="full-width-chart">
-                {revenueData.length ? <ResponsiveContainer width="100%" height={180}>
-                  <LineChart data={revenueData} margin={{ top: 12, right: 20, left: 5, bottom: 5 }}>
+            <section className="chart-grid">
+              <ChartCard title="Revenue: Actual vs Synthetic" subtitle="Revenue proxy · Real synthetic-control output" className="large-chart">
+                {revenueData.length ? <ResponsiveContainer width="100%" height={290}>
+                  <LineChart data={revenueData} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#edf0f5" />
                     <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: "#8791a5", fontSize: 11 }} minTickGap={28} />
-                    <YAxis tickLine={false} axisLine={false} tick={{ fill: "#8791a5", fontSize: 11 }} tickFormatter={(v) => Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} width={55} />
+                    <YAxis tickLine={false} axisLine={false} tick={{ fill: "#8791a5", fontSize: 11 }} tickFormatter={(v) => Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} width={48} />
                     <Tooltip formatter={(v) => formatNumber(v)} /><Legend />
                     <Line type="monotone" dataKey="actual" name="Actual revenue" stroke="#5965e9" strokeWidth={2.5} dot={false} connectNulls />
                     <Line type="monotone" dataKey="synthetic" name="Synthetic revenue" stroke="#20b894" strokeWidth={2.5} dot={false} connectNulls />
                   </LineChart>
                 </ResponsiveContainer> : <div className="empty-state">{loading ? "Loading revenue output…" : "No revenue rows received. Check /api/revenue."}</div>}
               </ChartCard>
-            </section>
-
-            {/* Four model-summary cards appear together in one row on desktop. */}
-            <section className="model-summary-section">
-              <div className="summary-section-heading">
-                <div>
-                  <h2>Model Summary</h2>
-                  <p>Key metrics from the synthetic-control model output</p>
-                </div>
-                <span className="summary-source">Python model results</span>
-              </div>
-              <div className="model-summary-grid">
-                <div className="summary-metric-card">
-                  <span className="summary-metric-label">Revenue · Average Gap</span>
-                  <strong>{formatNumber(revenueAverageGap)}</strong>
-                  <small>Average post-treatment revenue difference</small>
-                </div>
-                <div className="summary-metric-card">
-                  <span className="summary-metric-label">Revenue · Cumulative Gap</span>
-                  <strong>{formatNumber(revenueCumulativeGap)}</strong>
-                  <small>Total post-treatment revenue difference</small>
-                </div>
-                <div className="summary-metric-card">
-                  <span className="summary-metric-label">Revenue · Pre-treatment RMSE</span>
-                  <strong>{formatNumber(revenueRmse)}</strong>
-                  <small>Pre-treatment model fit error</small>
-                </div>
-                <div className="summary-metric-card">
-                  <span className="summary-metric-label">Sales · Average Gap</span>
-                  <strong>{formatNumber(salesAverageGap)}</strong>
-                  <small>Average post-treatment sales difference</small>
-                </div>
-              </div>
-              {summaryRows.length ? <div className="summary-table-wrap"><DataTable rows={summaryRows} /></div> : <div className="empty-state">{loading ? "Loading model summary…" : "No summary rows returned. Check /api/summary."}</div>}
-            </section>
-
-            <section className="lower-grid overview-secondary-grid">
               <ChartCard title="Sales Volume" subtitle="Actual vs synthetic · Real model output">
-                {salesData.length ? <ResponsiveContainer width="100%" height={310}>
+                {salesData.length ? <ResponsiveContainer width="100%" height={330}>
                   <AreaChart data={salesData} margin={{ top: 15, right: 5, left: -15, bottom: 0 }}>
                     <defs><linearGradient id="salesFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#7c70f5" stopOpacity={0.25} /><stop offset="95%" stopColor="#7c70f5" stopOpacity={0.01} /></linearGradient></defs>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#edf0f5" />
@@ -378,6 +430,8 @@ export default function App() {
                   </AreaChart>
                 </ResponsiveContainer> : <div className="empty-state">{loading ? "Loading sales output…" : "No sales rows received. Check /api/sales."}</div>}
               </ChartCard>
+            </section>
+            <section className="lower-grid">
               <ChartCard title="Donor Region Weights" subtitle="Actual synthetic-control weights from model output">
                 {donorData.length ? <ResponsiveContainer width="100%" height={310}>
                   <BarChart data={donorData} layout="vertical" margin={{ top: 4, right: 18, left: 10, bottom: 4 }}>
@@ -389,22 +443,27 @@ export default function App() {
                   </BarChart>
                 </ResponsiveContainer> : <div className="empty-state">{loading ? "Loading weights…" : "No donor weights returned. Check /api/weights."}</div>}
               </ChartCard>
+              <ChartCard title="Model Summary" subtitle="Metrics returned by synthetic_control_summary.csv">
+                {summaryRows.length ? <DataTable rows={summaryRows} /> : <div className="empty-state">{loading ? "Loading model summary…" : "No summary rows returned. Check /api/summary."}</div>}
+              </ChartCard>
             </section>
           </>}
 
-          {activePage === "Revenue Analysis" && <ChartCard title="Revenue: Actual vs Synthetic" subtitle="Revenue_Proxy_synthetic_control.csv">
-            {revenueData.length ? <>
-              <ResponsiveContainer width="100%" height={350}><LineChart data={revenueData}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="date" minTickGap={30} /><YAxis /><Tooltip formatter={(v) => formatNumber(v)} /><Legend /><Line dataKey="actual" name="Actual revenue" stroke="#5965e9" dot={false} /><Line dataKey="synthetic" name="Synthetic revenue" stroke="#20b894" dot={false} /><Line dataKey="gap" name="Gap" stroke="#f59e0b" dot={false} /></LineChart></ResponsiveContainer>
-              <DataTable rows={revenueRows} />
-            </> : <div className="empty-state">No revenue results loaded.</div>}
-          </ChartCard>}
+          {activePage === "Revenue Analysis" && (
+            <OutcomeAnalysis
+              rows={revenueRows}
+              label="Revenue"
+              subtitle="Revenue_Proxy_synthetic_control.csv"
+            />
+          )}
 
-          {activePage === "Sales Analysis" && <ChartCard title="Sales: Actual vs Synthetic" subtitle="Sales_Volume_synthetic_control.csv">
-            {salesData.length ? <>
-              <ResponsiveContainer width="100%" height={350}><LineChart data={salesData}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="date" minTickGap={30} /><YAxis /><Tooltip formatter={(v) => formatNumber(v)} /><Legend /><Line dataKey="actual" name="Actual sales" stroke="#5965e9" dot={false} /><Line dataKey="synthetic" name="Synthetic sales" stroke="#20b894" dot={false} /><Line dataKey="gap" name="Gap" stroke="#f59e0b" dot={false} /></LineChart></ResponsiveContainer>
-              <DataTable rows={salesRows} />
-            </> : <div className="empty-state">No sales results loaded.</div>}
-          </ChartCard>}
+          {activePage === "Sales Analysis" && (
+            <OutcomeAnalysis
+              rows={salesRows}
+              label="Sales"
+              subtitle="Sales_Volume_synthetic_control.csv"
+            />
+          )}
 
           {activePage === "Causal Impact" && <>
             <section className="metrics-grid">
