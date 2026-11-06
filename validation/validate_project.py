@@ -2,7 +2,7 @@
 validate_project.py  --  Member 4 (Validation) 
 =====================================================================
 Independent checks on the whole project:
-    A. Data quality (basic checks)
+    A. Data quality (basic and advanced checks)
     (more sections are added step by step)
 
 HOW TO RUN (from the repository ROOT folder):
@@ -146,13 +146,59 @@ def check_data():
     record(A, "Region_1 moves with donors before treatment", "PASS" if corr > 0.5 else "WARN",
            f"Correlation with average donor (sales, pre-period): {corr:.2f}")
 
-    return raw, None
+    # Analysis-ready file
+    if not READY_FILE.exists():
+        record(A, "Analysis-ready file exists", "FAIL", f"Missing: {READY_FILE}")
+        return raw, None
+    ready = pd.read_csv(READY_FILE, parse_dates=["Date"])
+    same_cols = ready[raw.columns].equals(raw) or np.allclose(
+        ready[raw.select_dtypes("number").columns].to_numpy(),
+        raw[raw.select_dtypes("number").columns].to_numpy())
+    rev_ok = np.allclose(ready["Revenue_Proxy"], ready["Price"] * ready["Sales_Volume"])
+    record(A, "Analysis-ready data = raw data + Revenue_Proxy (Price x Sales)",
+           "PASS" if (same_cols and rev_ok) else "FAIL",
+           f"Original columns unchanged: {same_cols}; Revenue_Proxy correct: {rev_ok}")
+    record(A, "Revenue_Proxy is mechanical, not independent",
+           "INFO", "Revenue_Proxy = Price x Sales, so a price rise lifts it by construction; "
+                   "judge the demand effect from Sales_Volume")
+
+    # Notebook regenerates the CSV?
+    if NOTEBOOK.exists():
+        try:
+            nb = json.load(open(NOTEBOOK, encoding="utf-8"))
+            code = next("".join(c["source"]) for c in nb["cells"]
+                        if c["cell_type"] == "code" and "treatment_day = 800" in "".join(c["source"]))
+            ns = {"display": lambda *a, **k: None}      # 'display' exists only inside Jupyter
+            import contextlib, io, os
+            # The notebook cell ends with .to_csv(...). Run it inside a throw-away folder so
+            # this validation NEVER writes a file into your repository.
+            scratch = tempfile.mkdtemp(prefix="nbrun_")
+            here = os.getcwd()
+            try:
+                os.chdir(scratch)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    exec(code, ns)
+            finally:
+                os.chdir(here)
+                shutil.rmtree(scratch, ignore_errors=True)
+            gen = ns["synthetic_data"]
+            num = raw.select_dtypes("number").columns
+            diff = float(np.abs(gen[num].to_numpy() - raw[num].to_numpy()).max())
+            record(A, "Notebook generator reproduces the CSV exactly",
+                   "PASS" if diff < 1e-6 else "FAIL", f"Largest difference: {diff:.2e}")
+        except Exception as exc:                      # noqa: BLE001
+            record(A, "Notebook generator reproduces the CSV exactly", "SKIP", f"Could not run: {exc}")
+    return raw, ready
 
 
 # =================================================================
 def main():
     print("Running validation ...\n")
     raw, ready = check_data()
+    if ready is None:
+        print("Cannot continue: analysis-ready data missing. Run prepare_data.py first.")
+    else:
+        pass
 
     df = pd.DataFrame(rows)
     df.to_csv(OUT_CSV, index=False, encoding="utf-8")
