@@ -2,12 +2,14 @@
 validate_project.py  --  Member 4 (Validation) 
 =====================================================================
 Independent checks on the whole project:
-    A. Data quality (basic and advanced checks)
+    A. Data quality           B. Reproducibility
     (more sections are added step by step)
 
 HOW TO RUN (from the repository ROOT folder):
     py .\\validation\\validate_project.py              (Windows)
     python validation/validate_project.py              (Mac / Linux)
+
+Optional:  --skip-rerun   (skips B, which re-runs the team's scripts; faster)
 
 OUTPUT:
     * a PASS / WARN / FAIL table on screen
@@ -192,13 +194,53 @@ def check_data():
 
 
 # =================================================================
+# B. REPRODUCIBILITY
+# =================================================================
+def check_reproducibility():
+    B = "B"
+    tmp = Path(tempfile.mkdtemp(prefix="validate_"))
+    try:
+        copy = tmp / "repo"
+        shutil.copytree(ROOT, copy, ignore=shutil.ignore_patterns(".git", "node_modules", "__pycache__"))
+        for script in ["prepare_data.py", "synthetic_control.py", "placebo_test.py"]:
+            run = subprocess.run([sys.executable, str(copy / "causal-analysis" / script)],
+                                 capture_output=True, text=True, cwd=copy)
+            ok = run.returncode == 0
+            record(B, f"{script} runs without errors", "PASS" if ok else "FAIL",
+                   "exit code 0" if ok else run.stderr.strip().splitlines()[-1][:200])
+            if not ok:
+                return
+        worst = 0.0
+        files = [Path("analysis_ready_data.csv")] + [Path("results") / f.name for f in sorted(RESULTS.glob("*.csv"))]
+        for rel in files:
+            a = pd.read_csv(CAUSAL / rel)
+            b = pd.read_csv(copy / "causal-analysis" / rel)
+            num = a.select_dtypes("number").columns
+            if a.shape != b.shape:
+                record(B, f"Re-run output matches saved: {rel.name}", "FAIL", "shape differs")
+                continue
+            worst = max(worst, float(np.abs(a[num].to_numpy() - b[num].to_numpy()).max()))
+        record(B, "Re-run reproduces every saved result file", "PASS" if worst < 1e-3 else "FAIL",
+               f"{len(files)} CSV files compared; largest difference {worst:.2e}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# =================================================================
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--skip-rerun", action="store_true", help="skip section B")
+    args = parser.parse_args()
+
     print("Running validation ...\n")
     raw, ready = check_data()
     if ready is None:
         print("Cannot continue: analysis-ready data missing. Run prepare_data.py first.")
     else:
-        pass
+        if args.skip_rerun:
+            record("B", "Re-run reproduces saved results", "SKIP", "--skip-rerun used")
+        else:
+            check_reproducibility()
 
     df = pd.DataFrame(rows)
     df.to_csv(OUT_CSV, index=False, encoding="utf-8")
