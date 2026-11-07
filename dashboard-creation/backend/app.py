@@ -23,7 +23,6 @@ ANALYSIS_DIR_CANDIDATES = [
     PROJECT_DIR / "causal_analysis",
 ]
 
-
 def first_existing_dir(candidates):
     return next(
         (path for path in candidates if path.is_dir()),
