@@ -3,6 +3,7 @@ validate_project.py  --  Member 4 (Validation)
 =====================================================================
 Independent checks on the whole project:
     A. Data quality           B. Reproducibility
+    C. Synthetic Control
     (more sections are added step by step)
 
 HOW TO RUN (from the repository ROOT folder):
@@ -227,6 +228,75 @@ def check_reproducibility():
 
 
 # =================================================================
+# C. SYNTHETIC CONTROL
+# =================================================================
+def check_synthetic_control(ready):
+    C = "C"
+    w = pd.read_csv(RESULTS / "synthetic_control_weights.csv")
+    summ = pd.read_csv(RESULTS / "synthetic_control_summary.csv").set_index("Outcome")
+    out = {}
+
+    for outcome in OUTCOMES:
+        wo = w[w["Outcome"] == outcome]
+        valid = (wo["Weight"] >= -1e-9).all() and abs(wo["Weight"].sum() - 1) < 1e-6
+        record(C, f"{outcome}: weights are >= 0 and sum to 1", "PASS" if valid else "FAIL",
+               f"sum = {wo['Weight'].sum():.6f}, min = {wo['Weight'].min():.2e}")
+
+        panel = panel_of(ready, outcome)
+        donors = sorted(c for c in panel.columns if c != TREATED)
+        pre = panel[panel.index < T0]
+        post_mask = panel.index >= T0
+
+        # independent re-fit
+        mine = fit_weights(pre, TREATED, donors)
+        gap_mine = panel[TREATED].to_numpy() - panel[donors].to_numpy() @ mine
+        saved_w = wo.set_index("Donor_Region").loc[donors, "Weight"].to_numpy()
+        gap_saved = panel[TREATED].to_numpy() - panel[donors].to_numpy() @ saved_w
+        pre_saved, pre_mine = rmse(gap_saved[~post_mask]), rmse(gap_mine[~post_mask])
+        eff_saved, eff_mine = gap_saved[post_mask].mean(), gap_mine[post_mask].mean()
+        out[outcome] = dict(panel=panel, donors=donors, w=mine, eff_mine=eff_mine, eff_saved=eff_saved)
+
+        equal = np.allclose(saved_w, 1 / len(donors), atol=1e-3)
+        suboptimal = pre_saved > pre_mine * 1.01
+        record(C, f"{outcome}: saved weights are optimal",
+               "FAIL" if suboptimal else "PASS",
+               (f"Saved weights are all {1/len(donors):.4f} (= plain average of donors); " if equal else "")
+               + f"pre-treatment RMSE saved {pre_saved:,.2f} vs re-fit {pre_mine:,.2f}")
+
+        rel = pre_saved / pre[TREATED].mean()
+        record(C, f"{outcome}: pre-treatment fit is close (RMSE < 5% of level)",
+               "PASS" if rel < 0.05 else "WARN", f"RMSE {pre_saved:,.2f} = {rel:.1%} of average level")
+
+        diff = abs(eff_saved - eff_mine) / abs(eff_mine)
+        record(C, f"{outcome}: average post-treatment gap matches independent re-fit",
+               "PASS" if diff < 0.02 else "FAIL",
+               f"team {eff_saved:,.2f} vs re-fit {eff_mine:,.2f} ({diff:.1%} apart)")
+
+        # summary file vs daily file (internal consistency)
+        daily = pd.read_csv(RESULTS / f"{outcome}_synthetic_control.csv", parse_dates=["Date"])
+        s = summ.loc[outcome]
+        d_avg = daily.loc[daily["Date"] >= T0, "Gap"].mean()
+        d_cum = daily.loc[daily["Date"] >= T0, "Gap"].sum()
+        d_rmse = rmse(daily.loc[daily["Date"] < T0, "Gap"])
+        ok = (np.isclose(d_avg, s["Average_Post_Treatment_Gap"], rtol=1e-6)
+              and np.isclose(d_cum, s["Cumulative_Post_Treatment_Gap"], rtol=1e-6)
+              and np.isclose(d_rmse, s["Pre_Treatment_RMSE"], rtol=1e-6))
+        record(C, f"{outcome}: summary file matches daily results file", "PASS" if ok else "FAIL",
+               f"avg gap {d_avg:,.2f}, cumulative {d_cum:,.2f}, pre-RMSE {d_rmse:,.2f}")
+
+    # same treatment date in every file?
+    dates = {}
+    for name, path in [("synthetic_control.py", CAUSAL / "synthetic_control.py"),
+                       ("placebo_test.py", CAUSAL / "placebo_test.py"),
+                       ("backend app.py", BACKEND)]:
+        text = path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
+        dates[name] = "2025-03-10" in text
+    record(C, "Same treatment date (2025-03-10) in all scripts", "PASS" if all(dates.values()) else "FAIL",
+           str(dates) + " -- note: hard-coded in 3 places, so change all three together")
+    return out
+
+
+# =================================================================
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-rerun", action="store_true", help="skip section B")
@@ -241,6 +311,7 @@ def main():
             record("B", "Re-run reproduces saved results", "SKIP", "--skip-rerun used")
         else:
             check_reproducibility()
+        sc = check_synthetic_control(ready)
 
     df = pd.DataFrame(rows)
     df.to_csv(OUT_CSV, index=False, encoding="utf-8")
