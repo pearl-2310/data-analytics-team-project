@@ -3,7 +3,7 @@ validate_project.py  --  Member 4 (Validation)
 =====================================================================
 Independent checks on the whole project:
     A. Data quality           B. Reproducibility
-    C. Synthetic Control
+    C. Synthetic Control      D. Placebo tests
     (more sections are added step by step)
 
 HOW TO RUN (from the repository ROOT folder):
@@ -297,6 +297,52 @@ def check_synthetic_control(ready):
 
 
 # =================================================================
+# D. PLACEBO TESTS
+# =================================================================
+def check_placebo(ready, sc):
+    D = "D"
+    plc = pd.read_csv(RESULTS / "placebo_test_results.csv")
+    summ = pd.read_csv(RESULTS / "synthetic_control_summary.csv").set_index("Outcome")
+
+    for outcome in OUTCOMES:
+        p = plc[plc["Outcome"] == outcome]
+        ratio = p.set_index("Target_Region")["Post_Pre_RMSE_Ratio"]
+        rank = int((ratio > ratio[TREATED]).sum() + 1)
+        n = len(ratio)
+        others = ratio.drop(TREATED)
+        record(D, f"{outcome}: Region_1 is the most extreme of {n} regions",
+               "PASS" if rank == 1 else "WARN",
+               f"Region_1 post/pre RMSE ratio {ratio[TREATED]:.2f} (rank {rank}/{n}); "
+               f"placebo regions {others.min():.2f}-{others.max():.2f}")
+        record(D, f"{outcome}: permutation p-value", "INFO",
+               f"p = {rank}/{n} = {rank/n:.2f}. With only {n} regions the smallest possible p-value is "
+               f"{1/n:.2f}, so it can never reach 0.05 -- report it as 'most extreme of {n}', not 'significant'")
+
+        a = p.set_index("Target_Region").loc[TREATED, "Average_Post_Treatment_Gap"]
+        b = summ.loc[outcome, "Average_Post_Treatment_Gap"]
+        d = abs(a - b) / abs(b)
+        record(D, f"{outcome}: placebo script agrees with main script for Region_1",
+               "PASS" if d < 0.02 else "WARN",
+               f"placebo_test.py gap {a:,.2f} vs synthetic_control.py gap {b:,.2f} ({d:.1%} apart) "
+               "-- the two scripts fit weights in different ways")
+
+    # in-time placebo: pretend treatment happened earlier
+    fake = pd.Timestamp("2024-07-01")
+    for outcome in OUTCOMES:
+        panel, donors = sc[outcome]["panel"], sc[outcome]["donors"]
+        fit_part = panel[panel.index < fake]
+        w = fit_weights(fit_part, TREATED, donors)
+        gap = panel[TREATED].to_numpy() - panel[donors].to_numpy() @ w
+        window = (panel.index >= fake) & (panel.index < T0)
+        fake_effect = gap[window].mean()
+        real_effect = sc[outcome]["eff_mine"]
+        share = abs(fake_effect) / abs(real_effect)
+        record(D, f"{outcome}: in-time placebo (fake treatment on 2024-07-01)",
+               "PASS" if share < 0.25 else "WARN",
+               f"fake 'effect' {fake_effect:,.2f} vs real estimate {real_effect:,.2f} ({share:.1%} of it)")
+
+
+# =================================================================
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-rerun", action="store_true", help="skip section B")
@@ -312,6 +358,7 @@ def main():
         else:
             check_reproducibility()
         sc = check_synthetic_control(ready)
+        check_placebo(ready, sc)
 
     df = pd.DataFrame(rows)
     df.to_csv(OUT_CSV, index=False, encoding="utf-8")
