@@ -29,7 +29,6 @@ def first_existing_dir(candidates):
         candidates[0]
     )
 
-
 ANALYSIS_DIR = first_existing_dir(ANALYSIS_DIR_CANDIDATES)
 
 # Results folders
