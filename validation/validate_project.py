@@ -4,6 +4,7 @@ validate_project.py  --  Member 4 (Validation)
 Independent checks on the whole project:
     A. Data quality           B. Reproducibility
     C. Synthetic Control      D. Placebo tests
+    E. Robustness
     (more sections are added step by step)
 
 HOW TO RUN (from the repository ROOT folder):
@@ -343,6 +344,52 @@ def check_placebo(ready, sc):
 
 
 # =================================================================
+# E. ROBUSTNESS + GROUND TRUTH
+# =================================================================
+def check_robustness(ready, sc):
+    E = "E"
+    for outcome in OUTCOMES:
+        panel, donors, full = sc[outcome]["panel"], sc[outcome]["donors"], sc[outcome]["eff_mine"]
+        pre = panel[panel.index < T0]
+        effects = []
+        for drop in donors:
+            keep = [d for d in donors if d != drop]
+            w = fit_weights(pre, TREATED, keep)
+            gap = panel[TREATED].to_numpy() - panel[keep].to_numpy() @ w
+            effects.append(gap[panel.index >= T0].mean())
+        spread = max(abs(e - full) for e in effects) / abs(full)
+        record(E, f"{outcome}: leave-one-donor-out",
+               "PASS" if spread < 0.10 else "WARN",
+               f"dropping any one donor gives {min(effects):,.2f} to {max(effects):,.2f} "
+               f"(full model {full:,.2f}); max change {spread:.1%}")
+
+        # Difference-in-differences with the donor average
+        post = panel.index >= T0
+        donor_avg = panel[donors].mean(axis=1)
+        did = (panel.loc[post, TREATED].mean() - panel.loc[~post, TREATED].mean()) \
+            - (donor_avg[post].mean() - donor_avg[~post].mean())
+        same = np.sign(did) == np.sign(full) and abs(did - full) / abs(full) < 0.30
+        record(E, f"{outcome}: simple difference-in-differences agrees",
+               "PASS" if same else "WARN", f"DiD {did:,.2f} vs synthetic control {full:,.2f}")
+
+    # ground truth -- possible only because the data is simulated
+    r1 = ready[(ready["Region_ID"] == TREATED) & (ready["Date"] >= T0)]
+    p_act = r1["Price"].to_numpy()
+    p_cf = p_act / TRUE_PRICE_JUMP
+    s_cf = r1["Sales_Volume"].to_numpy() + TRUE_PRICE_COEF * (p_act - p_cf)
+    truth = {"Sales_Volume": float((r1["Sales_Volume"].to_numpy() - s_cf).mean()),
+             "Revenue_Proxy": float((p_act * r1["Sales_Volume"].to_numpy() - p_cf * s_cf).mean())}
+    saved = pd.read_csv(RESULTS / "synthetic_control_summary.csv").set_index("Outcome")["Average_Post_Treatment_Gap"]
+    for outcome in OUTCOMES:
+        for label, est in [("team's saved result", saved[outcome]),
+                           ("independent re-fit", sc[outcome]["eff_mine"])]:
+            err = (est - truth[outcome]) / abs(truth[outcome])
+            res = "PASS" if abs(err) < 0.05 else ("WARN" if abs(err) < 0.10 else "FAIL")
+            record(E, f"{outcome}: {label} vs TRUE effect", res,
+                   f"estimate {est:,.2f} vs true {truth[outcome]:,.2f} ({err:+.1%})")
+
+
+# =================================================================
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-rerun", action="store_true", help="skip section B")
@@ -359,6 +406,7 @@ def main():
             check_reproducibility()
         sc = check_synthetic_control(ready)
         check_placebo(ready, sc)
+        check_robustness(ready, sc)
 
     df = pd.DataFrame(rows)
     df.to_csv(OUT_CSV, index=False, encoding="utf-8")
