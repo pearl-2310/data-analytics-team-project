@@ -4,8 +4,7 @@ validate_project.py  --  Member 4 (Validation)
 Independent checks on the whole project:
     A. Data quality           B. Reproducibility
     C. Synthetic Control      D. Placebo tests
-    E. Robustness
-    (more sections are added step by step)
+    E. Robustness             F. Dashboard / API
 
 HOW TO RUN (from the repository ROOT folder):
     py .\\validation\\validate_project.py              (Windows)
@@ -390,12 +389,91 @@ def check_robustness(ready, sc):
 
 
 # =================================================================
+# F. DASHBOARD / API
+# =================================================================
+def check_dashboard(ready):
+    F = "F"
+    if not BACKEND.exists():
+        record(F, "Backend file exists", "FAIL", str(BACKEND))
+        return
+    try:
+        import flask  # noqa: F401
+    except ImportError:
+        record(F, "Flask API tests", "SKIP", "Flask not installed: pip install flask flask-cors")
+        return
+    note = ""
+    try:
+        import flask_cors  # noqa: F401
+    except ImportError:
+        stub = types.ModuleType("flask_cors")
+        stub.CORS = lambda app, *a, **k: app           # CORS only affects browsers, not data
+        sys.modules["flask_cors"] = stub
+        note = " (flask-cors not installed here, so a no-op stand-in was used)"
+
+    sys.dont_write_bytecode = True      # do not leave __pycache__ files inside the repo
+    spec = importlib.util.spec_from_file_location("dash_backend", BACKEND)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    client = mod.app.test_client()
+
+    bad = []
+    for ep in ["/api/health", "/api/summary", "/api/revenue", "/api/sales",
+               "/api/weights", "/api/placebo", "/api/data"]:
+        r = client.get(ep)
+        if r.status_code != 200 or not r.get_json().get("success"):
+            bad.append(f"{ep} -> {r.status_code}")
+    record(F, "All 7 API endpoints return success", "FAIL" if bad else "PASS",
+           ("; ".join(bad) if bad else "7 of 7 returned HTTP 200") + note)
+
+    health = client.get("/api/health").get_json()
+    record(F, "Backend finds all 6 data files", "PASS" if all(health["files_found"].values()) else "FAIL",
+           str(health["files_found"]))
+
+    summ = pd.read_csv(RESULTS / "synthetic_control_summary.csv").set_index("Outcome")
+    api = {o["Outcome"]: o for o in client.get("/api/summary").get_json()["outcomes"]}
+    match = all(np.isclose(api[o]["Average_Post_Treatment_Gap"], summ.loc[o, "Average_Post_Treatment_Gap"])
+                for o in OUTCOMES)
+    record(F, "API summary numbers match the CSV", "PASS" if match else "FAIL",
+           "; ".join(f"{o}: {api[o]['Average_Post_Treatment_Gap']:,.2f}" for o in OUTCOMES))
+
+    n_rev = len(client.get("/api/revenue").get_json()["records"])
+    n_f = len(client.get("/api/revenue?start=2025-03-10&end=2025-03-19").get_json()["records"])
+    record(F, "Revenue endpoint rows + date filter", "PASS" if (n_rev == 1095 and n_f == 10) else "FAIL",
+           f"all dates -> {n_rev} rows (expect 1095); 10-day filter -> {n_f} rows (expect 10)")
+
+    n_w = len(client.get("/api/weights?outcome=Sales_Volume").get_json()["records"])
+    record(F, "Weights endpoint outcome filter", "PASS" if n_w == 9 else "FAIL", f"{n_w} rows (expect 9)")
+
+    d = client.get("/api/data?region=Region_1&limit=5000").get_json()
+    record(F, "Data endpoint region filter", "PASS" if d["total_matching"] == 1095 else "FAIL",
+           f"Region_1 -> {d['total_matching']} rows (expect 1095)")
+
+    code = client.get("/api/revenue?start=not-a-date").status_code
+    record(F, "Bad date is rejected cleanly", "PASS" if code == 400 else "FAIL", f"HTTP {code} (expect 400)")
+
+    # frontend (static checks only -- cannot run npm here)
+    has_index = (FRONTEND / "index.html").exists()
+    has_vite = any((FRONTEND / n).exists() for n in ["vite.config.js", "vite.config.ts", "vite.config.mjs"])
+    record(F, "Frontend has index.html and Vite config",
+           "PASS" if (has_index and has_vite) else "WARN",
+           f"index.html: {has_index}; vite.config: {has_vite}. "
+           "Vite needs both to start; test `npm install` + `npm run dev` on your own computer")
+    readme = (ROOT / "dashboard-creation" / "README.md").read_text(encoding="utf-8", errors="ignore")
+    wrong_path = "my-app" in readme and not (ROOT / "dashboard-creation" / "my-app").exists()
+    record(F, "Dashboard README paths match real folders", "WARN" if wrong_path else "PASS",
+           "README says `my-app/src/App.jsx` but the real folder is `frontend/`" if wrong_path else "paths OK")
+    app_js = (FRONTEND / "App.jsx").read_text(encoding="utf-8", errors="ignore") if (FRONTEND / "App.jsx").exists() else ""
+    record(F, "Frontend API address matches backend port", "PASS" if "127.0.0.1:5000" in app_js else "FAIL",
+           "App.jsx -> http://127.0.0.1:5000 ; app.py -> port 5000")
+
+
+# =================================================================
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-rerun", action="store_true", help="skip section B")
     args = parser.parse_args()
 
-    print("Running validation ...\n")
+    print("Running validation ... (about 1-2 minutes)\n")
     raw, ready = check_data()
     if ready is None:
         print("Cannot continue: analysis-ready data missing. Run prepare_data.py first.")
@@ -407,6 +485,7 @@ def main():
         sc = check_synthetic_control(ready)
         check_placebo(ready, sc)
         check_robustness(ready, sc)
+        check_dashboard(ready)
 
     df = pd.DataFrame(rows)
     df.to_csv(OUT_CSV, index=False, encoding="utf-8")
