@@ -22,8 +22,79 @@ OUTCOMES = ["Revenue_Proxy", "Sales_Volume"]
 def fit_synthetic_control(pre_treatment, donor_regions, outcome):
     """Find non-negative donor weights that sum to one."""
 
-    target = pre_treatment[TREATED_REGION].to_numpy()
-    donors = pre_treatment[donor_regions].to_numpy()
+    # Validate the input dataset.
+    if not isinstance(pre_treatment, pd.DataFrame):
+        raise TypeError(
+            "Pre-treatment data must be a pandas DataFrame."
+        )
+
+    if pre_treatment.empty:
+        raise ValueError("Pre-treatment data cannot be empty.")
+
+    if TREATED_REGION not in pre_treatment.columns:
+        raise ValueError(
+            f"Treated region {TREATED_REGION} not found."
+        )
+
+    # Validate the donor region list.
+    if donor_regions is None or isinstance(donor_regions, str):
+        raise ValueError(
+            "Donor regions must be provided as a list."
+        )
+
+    try:
+        donor_regions = list(donor_regions)
+    except TypeError as exc:
+        raise ValueError(
+            "Donor regions must be provided as a list."
+        ) from exc
+
+    if not donor_regions:
+        raise ValueError(
+            "At least one donor region must be provided."
+        )
+
+    if len(set(donor_regions)) != len(donor_regions):
+        raise ValueError(
+            "Donor regions must not contain duplicates."
+        )
+
+    if TREATED_REGION in donor_regions:
+        raise ValueError(
+            "Treated region cannot be included in donor regions."
+        )
+
+    missing_donors = [
+        region
+        for region in donor_regions
+        if region not in pre_treatment.columns
+    ]
+
+    if missing_donors:
+        raise ValueError(
+            f"Donor regions not found: {missing_donors}"
+        )
+
+    # Validate that all values are numeric and finite.
+    required_regions = [TREATED_REGION] + donor_regions
+
+    try:
+        values = pre_treatment[required_regions].to_numpy(
+            dtype=float
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Pre-treatment values must be numeric."
+        ) from exc
+
+    if not np.isfinite(values).all():
+        raise ValueError(
+            "Pre-treatment values must not contain "
+            "missing or infinite values."
+        )
+
+    target = values[:, 0]
+    donors = values[:, 1:]
 
     # Each column represents one donor region.
     def objective(weights):
@@ -56,6 +127,11 @@ def fit_synthetic_control(pre_treatment, donor_regions, outcome):
         raise RuntimeError(
             f"Weight optimization failed for {outcome}: "
             f"{result.message}"
+        )
+
+    if not np.isfinite(result.x).all():
+        raise RuntimeError(
+            f"Optimization produced invalid weights for {outcome}."
         )
 
     return result.x
