@@ -338,7 +338,6 @@ button {
   font-weight: 800;
   font-size: 12px;
 }
-
 .preview-notice strong {
   display: block;
   color: #78571c;
@@ -364,7 +363,6 @@ button {
   padding: 13px 17px;
   margin-bottom: 20px;
 }
-
 .filter-item {
   display: flex;
   align-items: center;
