@@ -1,0 +1,55 @@
+ID,Area,Check,Result,Detail
+A1,A,Raw dataset exists,PASS,"10,950 rows, 9 columns"
+A2,A,All required columns present,PASS,9 of 9 columns found
+A3,A,No missing values,PASS,0 missing cells
+A4,A,No duplicate Date + Region rows,PASS,0 duplicates
+A5,A,Balanced daily panel (same days for every region),PASS,10 regions x 1095 days; 2023-01-01 to 2025-12-30
+A6,A,Price > 0 and Sales >= 0,PASS,Price 97.9-125.2; Sales 413-551
+A7,A,Exactly one treated region (Region_1),PASS,Treated regions: ['Region_1']
+A8,A,Treatment flags consistent; starts on 2025-03-10,PASS,Post period starts 2025-03-10; Treatment_Effect = Treated x Post: True
+A9,A,Intervention is a PRICE INCREASE (not a cut),INFO,"Region_1 price changes +15.0% on 2025-03-10 -> revenue rises, sales fall"
+A10,A,Region_1 moves with donors before treatment,PASS,"Correlation with average donor (sales, pre-period): 0.85"
+A11,A,Analysis-ready data = raw data + Revenue_Proxy (Price x Sales),PASS,Original columns unchanged: True; Revenue_Proxy correct: True
+A12,A,"Revenue_Proxy is mechanical, not independent",INFO,"Revenue_Proxy = Price x Sales, so a price rise lifts it by construction; judge the demand effect from Sales_Volume"
+A13,A,Notebook generator reproduces the CSV exactly,PASS,Largest difference: 1.14e-13
+B1,B,prepare_data.py runs without errors,PASS,exit code 0
+B2,B,synthetic_control.py runs without errors,PASS,exit code 0
+B3,B,placebo_test.py runs without errors,PASS,exit code 0
+B4,B,Re-run reproduces every saved result file,PASS,6 CSV files compared; largest difference 3.98e-05
+C1,C,Revenue_Proxy: weights are >= 0 and sum to 1,PASS,"sum = 1.000000, min = 1.11e-01"
+C2,C,Revenue_Proxy: saved weights are optimal,FAIL,Saved weights are all 0.1111 (= plain average of donors); pre-treatment RMSE saved 994.80 vs re-fit 957.19
+C3,C,Revenue_Proxy: pre-treatment fit is close (RMSE < 5% of level),PASS,RMSE 994.80 = 1.9% of average level
+C4,C,Revenue_Proxy: average post-treatment gap matches independent re-fit,FAIL,"team 2,684.44 vs re-fit 2,936.67 (8.6% apart)"
+C5,C,Revenue_Proxy: summary file matches daily results file,PASS,"avg gap 2,684.44, cumulative 794,593.52, pre-RMSE 994.80"
+C6,C,Sales_Volume: weights are >= 0 and sum to 1,PASS,"sum = 1.000000, min = 0.00e+00"
+C7,C,Sales_Volume: saved weights are optimal,PASS,pre-treatment RMSE saved 9.67 vs re-fit 9.67
+C8,C,Sales_Volume: pre-treatment fit is close (RMSE < 5% of level),PASS,RMSE 9.67 = 1.9% of average level
+C9,C,Sales_Volume: average post-treatment gap matches independent re-fit,PASS,team -39.39 vs re-fit -39.39 (0.0% apart)
+C10,C,Sales_Volume: summary file matches daily results file,PASS,"avg gap -39.39, cumulative -11,658.53, pre-RMSE 9.67"
+C11,C,Same treatment date (2025-03-10) in all scripts,PASS,"{'synthetic_control.py': True, 'placebo_test.py': True, 'backend app.py': True} -- note: hard-coded in 3 places, so change all three together"
+D1,D,Revenue_Proxy: Region_1 is the most extreme of 10 regions,PASS,Region_1 post/pre RMSE ratio 2.99 (rank 1/10); placebo regions 0.92-1.13
+D2,D,Revenue_Proxy: permutation p-value,INFO,"p = 1/10 = 0.10. With only 10 regions the smallest possible p-value is 0.10, so it can never reach 0.05 -- report it as 'most extreme of 10', not 'significant'"
+D3,D,Revenue_Proxy: placebo script agrees with main script for Region_1,PASS,"placebo_test.py gap 2,721.38 vs synthetic_control.py gap 2,684.44 (1.4% apart) -- the two scripts fit weights in different ways"
+D4,D,Sales_Volume: Region_1 is the most extreme of 10 regions,PASS,Region_1 post/pre RMSE ratio 2.61 (rank 1/10); placebo regions 0.89-1.08
+D5,D,Sales_Volume: permutation p-value,INFO,"p = 1/10 = 0.10. With only 10 regions the smallest possible p-value is 0.10, so it can never reach 0.05 -- report it as 'most extreme of 10', not 'significant'"
+D6,D,Sales_Volume: placebo script agrees with main script for Region_1,WARN,placebo_test.py gap -31.61 vs synthetic_control.py gap -39.39 (19.8% apart) -- the two scripts fit weights in different ways
+D7,D,Revenue_Proxy: in-time placebo (fake treatment on 2024-07-01),PASS,"fake 'effect' 26.51 vs real estimate 2,936.67 (0.9% of it)"
+D8,D,Sales_Volume: in-time placebo (fake treatment on 2024-07-01),PASS,fake 'effect' 0.76 vs real estimate -39.39 (1.9% of it)
+E1,E,Revenue_Proxy: leave-one-donor-out,PASS,"dropping any one donor gives 2,769.07 to 2,959.81 (full model 2,936.67); max change 5.7%"
+E2,E,Revenue_Proxy: simple difference-in-differences agrees,PASS,"DiD 2,958.97 vs synthetic control 2,936.67"
+E3,E,Sales_Volume: leave-one-donor-out,PASS,dropping any one donor gives -39.51 to -38.70 (full model -39.39); max change 1.8%
+E4,E,Sales_Volume: simple difference-in-differences agrees,PASS,DiD -40.14 vs synthetic control -39.39
+E5,E,Revenue_Proxy: team's saved result vs TRUE effect,WARN,"estimate 2,684.44 vs true 2,866.84 (-6.4%)"
+E6,E,Revenue_Proxy: independent re-fit vs TRUE effect,PASS,"estimate 2,936.67 vs true 2,866.84 (+2.4%)"
+E7,E,Sales_Volume: team's saved result vs TRUE effect,PASS,estimate -39.39 vs true -40.27 (+2.2%)
+E8,E,Sales_Volume: independent re-fit vs TRUE effect,PASS,estimate -39.39 vs true -40.27 (+2.2%)
+F1,F,All 7 API endpoints return success,PASS,"7 of 7 returned HTTP 200 (flask-cors not installed here, so a no-op stand-in was used)"
+F2,F,Backend finds all 6 data files,PASS,"{'Revenue_Proxy_synthetic_control.csv': True, 'Sales_Volume_synthetic_control.csv': True, 'analysis_ready_data.csv': True, 'placebo_test_results.csv': True, 'synthetic_control_summary.csv': True, 'synthetic_control_weights.csv': True}"
+F3,F,API summary numbers match the CSV,PASS,"Revenue_Proxy: 2,684.44; Sales_Volume: -39.39"
+F4,F,Revenue endpoint rows + date filter,PASS,all dates -> 1095 rows (expect 1095); 10-day filter -> 10 rows (expect 10)
+F5,F,Weights endpoint outcome filter,PASS,9 rows (expect 9)
+F6,F,Data endpoint region filter,PASS,Region_1 -> 1095 rows (expect 1095)
+F7,F,Bad date is rejected cleanly,PASS,HTTP 400 (expect 400)
+F8,F,Frontend has index.html and Vite config,WARN,index.html: False; vite.config: False. Vite needs both to start; test `npm install` + `npm run dev` on your own computer
+F9,F,Dashboard README paths match real folders,WARN,README says `my-app/src/App.jsx` but the real folder is `frontend/`
+F10,F,Frontend API address matches backend port,PASS,App.jsx -> http://127.0.0.1:5000 ; app.py -> port 5000
