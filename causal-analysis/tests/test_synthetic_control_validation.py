@@ -98,6 +98,7 @@ class TestSyntheticControlValidation(unittest.TestCase):
 
     def test_infinite_values_raise_error(self):
         data = self.pre_treatment.copy()
+        data["Region_2"] = data["Region_2"].astype(float)
         data.loc[0, "Region_2"] = np.inf
 
         with self.assertRaises(ValueError):
@@ -106,7 +107,6 @@ class TestSyntheticControlValidation(unittest.TestCase):
                 self.donors,
                 "Revenue_Proxy",
             )
-
     def test_non_dataframe_input_raises_error(self):
         with self.assertRaises(TypeError):
             fit_synthetic_control(

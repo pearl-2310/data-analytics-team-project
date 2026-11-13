@@ -123,18 +123,41 @@ def fit_synthetic_control(pre_treatment, donor_regions, outcome):
         constraints=constraints,
     )
 
+    # Check whether the optimizer succeeded.
     if not result.success:
         raise RuntimeError(
             f"Weight optimization failed for {outcome}: "
             f"{result.message}"
         )
 
-    if not np.isfinite(result.x).all():
+    weights = np.asarray(result.x, dtype=float)
+
+    # Validate the number of returned weights.
+    if weights.shape != (len(donor_regions),):
         raise RuntimeError(
-            f"Optimization produced invalid weights for {outcome}."
+            f"Optimization returned an incorrect number of "
+            f"weights for {outcome}."
         )
 
-    return result.x
+    # Validate that all weights are finite.
+    if not np.isfinite(weights).all():
+        raise RuntimeError(
+            f"Optimization produced non-finite weights for {outcome}."
+        )
+
+    # Validate that no donor weight is negative.
+    if np.any(weights < 0):
+        raise RuntimeError(
+            f"Optimization produced negative weights for {outcome}."
+        )
+
+    # Validate that all donor weights sum to one.
+    if not np.isclose(weights.sum(), 1.0, rtol=1e-7, atol=1e-7):
+        raise RuntimeError(
+            f"Optimization weights do not sum to one for {outcome}."
+        )
+
+    return weights
 
 
 def main():
