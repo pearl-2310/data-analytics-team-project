@@ -50,3 +50,39 @@ For each region we compute the **post/pre RMSE ratio**: how big the error is aft
 Region_1's ratio is 2.99 for revenue and 2.61 for sales; all nine placebo regions are between 0.89 and 1.13. Region_1 is the clear outlier.
 
 With 10 regions the smallest possible p-value is 1/10 = 0.10, so the result is described as "most extreme of 10 regions", not as significant at 5 %.
+
+## 5. Extra checks used in validation
+
+| Check | What it tests | Result |
+|---|---|---|
+| **In-time placebo** | Pretend the price change happened on 2024-07-01. Do we find an effect? We should not. | About 1 to 2 % of the real estimate |
+| **Leave-one-donor-out** | Remove each donor in turn and re-estimate. Is the answer stable? | Sales changes by at most 1.8 % |
+| **Difference-in-differences** | A simpler, different method: (change in Region_1) minus (change in donor average) | -40.1 vs -39.4 for sales |
+| **Comparison with the truth** | Compare estimates with the effect computed from the data generator | Sales within 2.2 % |
+
+## 6. Reading the results
+
+- **Sales:** about -39 units/day (-8 %). Customers bought fewer units at the higher price.
+- **Revenue:** about +2,700 to +2,900/day (+5 %). Fewer units, but each one sold for 15 % more.
+- **Rough price elasticity:** -8.1 % / +15 % = about -0.54. A 1 % price rise is associated with about 0.5 % fewer sales.
+- `Revenue_Proxy` is Price x Sales, so a price rise lifts it by construction. Treat **sales** as the cleaner measure of the demand response.
+
+## 7. Limitations
+
+- **Simulated data.** Real markets are messier; the true effect is known only because we created it.
+- **One treated region, nine donors.** Results depend on the donors being good comparisons, and no confidence interval is available.
+- **No spillovers modelled.** The method assumes the other regions were not affected by Region_1's price change.
+- **Double Machine Learning is not implemented**, although the data contains the confounders (`Competitor_Price`, `Regional_Google_Trends_Index`) it would need.
+
+## 8. Glossary
+
+| Term | Meaning |
+|---|---|
+| Treated unit | The region that received the intervention (Region_1) |
+| Donor pool | Untreated regions used to build the comparison |
+| Counterfactual | What would have happened without the intervention |
+| Synthetic control | Weighted mix of donors that imitates the treated unit before the intervention |
+| Gap | Real value minus synthetic value |
+| RMSE | Typical size of the error between real and synthetic series |
+| Placebo test | Applying the method to units that were not treated, to see how large "fake" effects can be |
+| Confounder | A factor (season, trend, competitor price) that influences both price and sales |
